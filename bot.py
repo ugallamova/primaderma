@@ -337,7 +337,7 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.COMMAND, unknown))
 
     logger.info("Запуск бота с новой архитектурой диалогов...")
-    application.run_polling()
+    application.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
