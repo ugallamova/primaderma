@@ -5,8 +5,12 @@ import re
 import socket
 import atexit
 import sys
+import time
+import random
+import asyncio
+import threading
+from flask import Flask
 from config import TOKEN, ADMIN_ID
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from telegram.ext import (
     Application,
@@ -15,16 +19,34 @@ from telegram.ext import (
     filters,
     CallbackContext,
     CallbackQueryHandler,
-    PicklePersistence
+    PicklePersistence,
+    Update
 )
 
-# --- Настройка логирования ---
-# Настраиваем базовую конфигурацию для вывода в консоль с поддержкой UTF-8
+# Initialize Flask app
+app = Flask(__name__)
+
+# Configure logging
 logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    encoding='utf-8'  # Критически важно для Windows, чтобы эмодзи не ломали логи
+    encoding='utf-8'
 )
+logger = logging.getLogger(__name__)
+
+# Global variable for the bot application
+application = None
+
+# Create a simple health check endpoint
+@app.route('/')
+def health_check():
+    return "Bot is running!", 200
+
+def run_flask():
+    """Run Flask server for health checks"""
+    port = int(os.environ.get('PORT', 10000))
+    logger.info(f"Starting Flask server on port {port}")
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 # Добавляем обработчик для записи логов в файл, также с UTF-8
 file_handler = logging.FileHandler("primaderma_bot.log", encoding='utf-8')
@@ -422,36 +444,101 @@ async def unknown(update: Update, context: CallbackContext):
     await update.message.reply_text("Извините, я не понимаю эту команду. Пожалуйста, используйте меню.", reply_markup=main_menu_keyboard())
 
 async def error_handler(update: object, context: CallbackContext) -> None:
+    """Обработчик ошибок"""
     logger.error("Произошла ошибка:", exc_info=context.error)
     if isinstance(update, Update) and update.effective_message:
-        await update.effective_message.reply_text("Произошла внутренняя ошибка. Попробуйте позже.", reply_markup=main_menu_keyboard())
+        await update.effective_message.reply_text(
+            "Произошла внутренняя ошибка. Попробуйте позже.", 
+            reply_markup=main_menu_keyboard()
+        )
 
-def is_port_in_use(port: int) -> bool:
-    """Проверяет, используется ли порт другим процессом"""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        return s.connect_ex(('localhost', port)) == 0
-
-def cleanup():
+async def cleanup():
     """Функция для очистки ресурсов при завершении работы"""
-    logger.info("Выполнение очистки перед завершением работы...")
-    if 'application' in globals():
-        logger.info("Остановка приложения...")
-        application.stop()
+    global application
+    if application and application.running:
+        logger.info("Остановка бота...")
+        await application.stop()
+        await application.shutdown()
+        logger.info("Бот успешно остановлен")
 
-# Глобальная переменная для управления состоянием сервера
-httpd = None
+async def setup_application() -> Application:
+    """Настройка и возврат экземпляра Application"""
+    logger.info("Настройка приложения бота...")
+    
+    if not TOKEN:
+        logger.critical("Токен бота не найден! Проверьте файл config.py.")
+        raise ValueError("Токен бота не найден")
+    
+    # Создаем приложение с сохранением состояния
+    persistence = PicklePersistence(filepath="bot_persistence.pkl")
+    application = Application.builder()\
+        .token(TOKEN)\
+        .persistence(persistence)\
+        .build()
+    
+    # Добавляем обработчики команд
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", show_help))
+    
+    # Обработчики сообщений
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, dispatch_text_message))
+    
+    # Обработчики колбэков
+    application.add_handler(CallbackQueryHandler(button_callback))
+    
+    # Обработчики ошибок
+    application.add_error_handler(error_handler)
+    
+    return application
+
+async def run_bot():
+    """Запуск бота с обработкой ошибок"""
+    global application
+    try:
+        # Настраиваем приложение
+        application = await setup_application()
+        logger.info("Бот запускается...")
+        
+        # Запускаем бота с long polling
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling(
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES
+        )
+        
+        logger.info("Бот запущен и работает")
+        
+        # Держим бота запущенным
+        while True:
+            await asyncio.sleep(3600)  # Спим 1 час
+            
+    except asyncio.CancelledError:
+        logger.info("Получен запрос на остановку бота")
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка при работе бота: {e}", exc_info=True)
+        raise
+    finally:
+        await cleanup()
+
+# Health check endpoint
+@app.route('/')
+def health_check():
+    return "Bot is running!", 200
 
 def main() -> None:
-    # Проверяем, не запущен ли уже бот
-    if is_port_in_use(10000):
-        logger.error("Другой экземпляр бота уже запущен. Завершение работы.")
-        return
-        
+    # Добавляем случайную задержку перед запуском (0-10 секунд)
+    delay = random.uniform(0, 10)
+    logger.info(f"Ожидание {delay:.2f} секунд перед запуском...")
+    time.sleep(delay)
+    
     if not TOKEN:
         logger.critical("Токен бота не найден! Проверьте файл config.py.")
         return
 
     persistence = PicklePersistence(filepath="bot_persistence.pkl")
+    global application
     application = Application.builder().token(TOKEN).persistence(persistence).build()
 
     # --- Регистрация обработчиков ---
@@ -487,76 +574,57 @@ def main() -> None:
         application.run_polling(
             drop_pending_updates=True,
             close_loop=False,
-            allowed_updates=Update.ALL_TYPES
+            allowed_updates=Update.ALL_TYPES,
+            stop_signals=None  # Отключаем обработку сигналов, так как мы их обрабатываем сами
         )
+        return lock_file_handle
     except Exception as e:
-        logger.error(f"Ошибка при запуске бота: {e}")
+        logger.error(f"Ошибка при запуске бота: {e}", exc_info=True)
+
         import sys
         sys.exit(1)
 
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import threading
-import signal
-import sys
-
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
-        self.end_headers()
-        self.wfile.write(b'OK')
-
-# Глобальная переменная для управления состоянием сервера
-httpd = None
-
-def run_health_check():
-    global httpd
-    server_address = ('', int(os.environ.get('PORT', '10000')))
-    httpd = HTTPServer(server_address, HealthCheckHandler)
-    
-    logger.info(f"Запуск health check сервера на порту {server_address[1]}")
-    httpd.serve_forever()
-
-def signal_handler(signum, frame):
-    logger.info(f"Получен сигнал {signum}, завершение работы...")
-    
-    # Останавливаем HTTP сервер, если он запущен
-    global httpd
-    if httpd:
-        logger.info("Остановка health check сервера...")
-        httpd.shutdown()
-        httpd.server_close()
-    
-    # Останавливаем бота
-    if 'application' in globals():
-        logger.info("Остановка бота...")
-        application.stop()
-    
-    sys.exit(0)
-
 if __name__ == "__main__":
-    # Регистрируем функцию очистки при завершении работы
-    atexit.register(cleanup)
-    
-    # Устанавливаем обработчики сигналов только в основном потоке
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
-    
-    logger.info("Запуск бота...")
-    
     try:
-        # Запускаем health check сервер в отдельном потоке
-        health_check_thread = threading.Thread(target=run_health_check, daemon=True)
-        health_check_thread.start()
-        logger.info("Health check сервер запущен")
+        # Создаем event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         
-        # Запускаем бота в основном потоке
-        main()
-    except Exception as e:
-        logger.error(f"Критическая ошибка: {e}", exc_info=True)
-        signal_handler(signal.SIGTERM, None)
-        sys.exit(1)
+        # Запускаем бота в отдельной задаче
+        bot_task = loop.create_task(run_bot())
+        
+        # Запускаем Flask в отдельном потоке
+        flask_thread = threading.Thread(target=run_flask, daemon=True)
+        flask_thread.start()
+        
+        logger.info("Приложение запущено")
+        logger.info(f"Health check доступен на порту {os.environ.get('PORT', 10000)}")
+        
+        # Запускаем event loop
+        loop.run_forever()
+        
     except KeyboardInterrupt:
         logger.info("Получен сигнал прерывания с клавиатуры")
-        signal_handler(signal.SIGINT, None)
+    except Exception as e:
+        logger.error(f"Критическая ошибка: {e}", exc_info=True)
+    finally:
+        # Очищаем ресурсы
+        if 'loop' in locals():
+            try:
+                # Отменяем все задачи
+                tasks = [t for t in asyncio.all_tasks(loop) if not t.done()]
+                for task in tasks:
+                    task.cancel()
+                
+                # Запускаем очистку
+                if tasks:
+                    loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+                
+                # Закрываем loop
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                loop.close()
+            except Exception as e:
+                logger.error(f"Ошибка при завершении работы: {e}")
+        
+        logger.info("Приложение остановлено")
         sys.exit(0)
