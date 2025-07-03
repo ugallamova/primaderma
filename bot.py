@@ -542,67 +542,82 @@ async def run_bot():
     finally:
         await cleanup()
 
-def main() -> None:
-    # Запускаем Flask-сервер в отдельном потоке
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    logger.info("Flask health check сервер запущен в отдельном потоке")
+async def main():
+    """Основная асинхронная функция для запуска бота"""
+    lock_file_handle = None
+    application = None
     
-    # Добавляем случайную задержку перед запуском (0-10 секунд)
-    delay = random.uniform(0, 10)
-    logger.info(f"Ожидание {delay:.2f} секунд перед запуском бота...")
-    time.sleep(delay)
-    
-    if not TOKEN:
-        logger.critical("Токен бота не найден! Проверьте файл config.py.")
-        return
-
-    persistence = PicklePersistence(filepath="bot_persistence.pkl")
-    global application
-    application = Application.builder().token(TOKEN).persistence(persistence).build()
-
-    # --- Регистрация обработчиков ---
-    application.add_handler(CommandHandler("start", start))
-    
-    # Навигация и основные действия
-    application.add_handler(CallbackQueryHandler(main_menu_nav, pattern="^main_menu$"))
-    application.add_handler(CallbackQueryHandler(show_products, pattern="^catalog$"))
-    application.add_handler(CallbackQueryHandler(show_product_list_by_category, pattern="^category_"))
-    application.add_handler(CallbackQueryHandler(show_product_detail, pattern="^product_"))
-    application.add_handler(CallbackQueryHandler(social_and_shops, pattern="^social$"))
-
-    # Запуск диалогов
-    application.add_handler(CallbackQueryHandler(start_support_dialog, pattern="^support$"))
-    application.add_handler(CallbackQueryHandler(start_ambassador_dialog, pattern="^ambassador$"))
-    application.add_handler(CallbackQueryHandler(product_quiz_start, pattern="^start_quiz$"))
-
-    # Обработка ответов в диалогах
-    application.add_handler(CallbackQueryHandler(handle_quiz_answer, pattern="^quiz_\\d+"))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, dispatch_text_message))
-    application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media_message))
-    
-    # Обработчик ошибок
-    application.add_error_handler(error_handler)
-    
-    # Обработчик неизвестных команд должен быть последним
-    application.add_handler(MessageHandler(filters.COMMAND, unknown))
-    
-    # Запускаем бота с обработкой ошибок
-    logger.info("Запуск бота с новой архитектурой диалогов...")
     try:
-        # Запускаем бота с drop_pending_updates для игнорирования старых сообщений
-        application.run_polling(
+        # Проверяем, что бот не запущен на другом сервере
+        lock_file_handle = acquire_lock('bot.lock')
+        if not lock_file_handle:
+            logger.error("Бот уже запущен на другом сервере!")
+            return None
+            
+        # Запускаем Flask-сервер в отдельном потоке
+        flask_thread = threading.Thread(target=run_flask, daemon=True)
+        flask_thread.start()
+        logger.info("Flask health check сервер запущен в отдельном потоке")
+        
+        # Добавляем случайную задержку перед запуском (0-10 секунд)
+        delay = random.uniform(0, 10)
+        logger.info(f"Ожидание {delay:.2f} секунд перед запуском бота...")
+        await asyncio.sleep(delay)
+        
+        if not TOKEN:
+            logger.critical("Токен бота не найден! Проверьте файл config.py.")
+            return None
+            
+        # Создаем приложение
+        application = Application.builder().token(TOKEN).build()
+        
+        # Регистрируем обработчики
+        register_handlers(application)
+        
+        # Запускаем бота с обработкой ошибок
+        logger.info("Запуск бота с новой архитектурой диалогов...")
+        
+        # Очищаем все обновления перед запуском
+        logger.info("Очистка обновлений перед запуском...")
+        await application.bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Очистка обновлений завершена")
+        
+        # Запускаем бота
+        await application.initialize()
+        await application.start()
+        await application.updater.start_polling(
             drop_pending_updates=True,
-            close_loop=False,
-            allowed_updates=Update.ALL_TYPES,
-            stop_signals=None  # Отключаем обработку сигналов, так как мы их обрабатываем сами
+            allowed_updates=Update.ALL_TYPES
         )
-        return lock_file_handle
+        logger.info("Бот успешно запущен")
+        
+        # Бесконечный цикл для поддержания работы бота
+        while True:
+            await asyncio.sleep(3600)  # Спим по часу, чтобы не нагружать процессор
+            
+    except asyncio.CancelledError:
+        logger.info("Получен сигнал на завершение работы...")
+        raise
+        
     except Exception as e:
-        logger.error(f"Ошибка при запуске бота: {e}", exc_info=True)
-
-        import sys
-        sys.exit(1)
+        logger.error(f"Критическая ошибка: {e}", exc_info=True)
+        raise
+        
+    finally:
+        # Корректно завершаем работу
+        if application:
+            try:
+                logger.info("Остановка бота...")
+                if hasattr(application, 'running') and application.running:
+                    await application.stop()
+                    await application.shutdown()
+            except Exception as e:
+                logger.error(f"Ошибка при остановке бота: {e}")
+        
+        if lock_file_handle:
+            release_lock(lock_file_handle)
+            
+        logger.info("Бот остановлен")
 
 if __name__ == "__main__":
     try:
@@ -611,10 +626,8 @@ if __name__ == "__main__":
         asyncio.set_event_loop(loop)
         
         # Запускаем основную функцию
-        loop.run_until_complete(main())
-        
-        # Запускаем event loop
-        loop.run_forever()
+        main_task = loop.create_task(main())
+        loop.run_until_complete(main_task)
         
     except KeyboardInterrupt:
         logger.info("Получен сигнал прерывания с клавиатуры")
@@ -623,21 +636,17 @@ if __name__ == "__main__":
     finally:
         # Очищаем ресурсы
         if 'loop' in locals():
-            try:
-                # Отменяем все задачи
-                tasks = [t for t in asyncio.all_tasks(loop) if not t.done()]
-                for task in tasks:
-                    task.cancel()
-                
-                # Запускаем очистку
-                if tasks:
-                    loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
-                
-                # Закрываем loop
-                loop.run_until_complete(loop.shutdown_asyncgens())
-                loop.close()
-            except Exception as e:
-                logger.error(f"Ошибка при завершении работы: {e}")
-        
-        logger.info("Приложение остановлено")
+            # Отменяем все задачи
+            pending = asyncio.all_tasks(loop=loop)
+            for task in pending:
+                task.cancel()
+            
+            # Запускаем loop для завершения всех задач
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            
+            # Закрываем loop
+            loop.close()
+            
+        logger.info("Приложение завершило работу")
         sys.exit(0)
