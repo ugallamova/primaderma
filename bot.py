@@ -456,9 +456,19 @@ def main() -> None:
     
     # Обработчик неизвестных команд должен быть последним
     application.add_handler(MessageHandler(filters.COMMAND, unknown))
-
+    
+    # Запускаем бота с обработкой ошибок
     logger.info("Запуск бота с новой архитектурой диалогов...")
-    application.run_polling(drop_pending_updates=True)
+    try:
+        # Запускаем бота с drop_pending_updates для игнорирования старых сообщений
+        application.run_polling(
+            drop_pending_updates=True,
+            close_loop=False,
+            allowed_updates=Update.ALL_TYPES
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при запуске бота: {e}")
+        raise
 
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
