@@ -41,10 +41,31 @@ application = None
 def health_check():
     return "Bot is running!", 200
 
+# Эндпоинт для внешнего пинга (UptimeRobot)
+@app.route('/ping')
+def ping():
+    logger.info("Получен ping-запрос")
+    return "pong", 200
+
+def get_public_url():
+    """Получаем публичный URL из переменных окружения Render"""
+    render_external_url = os.environ.get('RENDER_EXTERNAL_URL')
+    if render_external_url:
+        return render_external_url
+    
+    # Если переменной окружения нет, возвращаем URL с localhost (для локальной разработки)
+    port = os.environ.get('PORT', '10000')
+    return f"http://localhost:{port}"
+
 def run_flask():
     """Run Flask server for health checks"""
     port = int(os.environ.get('PORT', 10000))
+    public_url = get_public_url()
     logger.info(f"Starting Flask server on port {port}")
+    logger.info(f"Public URL: {public_url}")
+    logger.info(f"Health check: {public_url}/")
+    logger.info(f"Ping endpoint: {public_url}/ping")
+    
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 # Добавляем обработчик для записи логов в файл, также с UTF-8
