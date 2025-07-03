@@ -2,6 +2,9 @@ import logging
 import os
 import traceback
 import re
+import socket
+import atexit
+import sys
 from config import TOKEN, ADMIN_ID
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -423,7 +426,27 @@ async def error_handler(update: object, context: CallbackContext) -> None:
     if isinstance(update, Update) and update.effective_message:
         await update.effective_message.reply_text("Произошла внутренняя ошибка. Попробуйте позже.", reply_markup=main_menu_keyboard())
 
+def is_port_in_use(port: int) -> bool:
+    """Проверяет, используется ли порт другим процессом"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        return s.connect_ex(('localhost', port)) == 0
+
+def cleanup():
+    """Функция для очистки ресурсов при завершении работы"""
+    logger.info("Выполнение очистки перед завершением работы...")
+    if 'application' in globals():
+        logger.info("Остановка приложения...")
+        application.stop()
+
+# Глобальная переменная для управления состоянием сервера
+httpd = None
+
 def main() -> None:
+    # Проверяем, не запущен ли уже бот
+    if is_port_in_use(10000):
+        logger.error("Другой экземпляр бота уже запущен. Завершение работы.")
+        return
+        
     if not TOKEN:
         logger.critical("Токен бота не найден! Проверьте файл config.py.")
         return
@@ -512,20 +535,28 @@ def signal_handler(signum, frame):
     sys.exit(0)
 
 if __name__ == "__main__":
+    # Регистрируем функцию очистки при завершении работы
+    atexit.register(cleanup)
+    
     # Устанавливаем обработчики сигналов только в основном потоке
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
     
-    # Запускаем health check сервер в отдельном потоке
-    health_check_thread = threading.Thread(target=run_health_check, daemon=True)
-    health_check_thread.start()
+    logger.info("Запуск бота...")
     
     try:
+        # Запускаем health check сервер в отдельном потоке
+        health_check_thread = threading.Thread(target=run_health_check, daemon=True)
+        health_check_thread.start()
+        logger.info("Health check сервер запущен")
+        
         # Запускаем бота в основном потоке
         main()
     except Exception as e:
-        logger.error(f"Критическая ошибка: {e}")
-        signal_handler(signal.SIGTERM, None)  # Вызываем обработчик сигнала для корректного завершения
+        logger.error(f"Критическая ошибка: {e}", exc_info=True)
+        signal_handler(signal.SIGTERM, None)
+        sys.exit(1)
     except KeyboardInterrupt:
         logger.info("Получен сигнал прерывания с клавиатуры")
         signal_handler(signal.SIGINT, None)
+        sys.exit(0)
