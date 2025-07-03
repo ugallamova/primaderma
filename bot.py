@@ -525,7 +525,7 @@ def register_handlers(application: Application):
 
     # Message handlers
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, dispatch_text_message))
-    application.add_handler(MessageHandler(filters.PHOTO | filters.DOCUMENT, handle_media_message))
+    application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media_message))
     
     # Unknown command handler must be last
     application.add_handler(MessageHandler(filters.COMMAND, unknown))
