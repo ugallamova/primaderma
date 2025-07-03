@@ -468,10 +468,13 @@ def main() -> None:
         )
     except Exception as e:
         logger.error(f"Ошибка при запуске бота: {e}")
-        raise
+        import sys
+        sys.exit(1)
 
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
+import signal
+import sys
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -483,12 +486,39 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
 def run_health_check():
     server_address = ('', int(os.environ.get('PORT', '10000')))
     httpd = HTTPServer(server_address, HealthCheckHandler)
+    
+    def graceful_shutdown(signum, frame):
+        logger.info("Остановка health check сервера...")
+        httpd.shutdown()
+        httpd.server_close()
+        sys.exit(0)
+    
+    # Устанавливаем обработчики сигналов
+    signal.signal(signal.SIGTERM, graceful_shutdown)
+    signal.signal(signal.SIGINT, graceful_shutdown)
+    
+    logger.info(f"Запуск health check сервера на порту {server_address[1]}")
     httpd.serve_forever()
 
+def signal_handler(signum, frame):
+    logger.info(f"Получен сигнал {signum}, завершение работы...")
+    # Application.stop() остановит поллинг и закроет event loop
+    if 'application' in globals():
+        application.stop()
+    sys.exit(0)
+
 if __name__ == "__main__":
-    # Запускаем health check сервер в отдельном потоке
-    health_check_thread = threading.Thread(target=run_health_check, daemon=True)
-    health_check_thread.start()
+    # Устанавливаем обработчики сигналов
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
     
-    # Запускаем бота в основном потоке
-    main()
+    try:
+        # Запускаем health check сервер в отдельном потоке
+        health_check_thread = threading.Thread(target=run_health_check, daemon=True)
+        health_check_thread.start()
+        
+        # Запускаем бота в основном потоке
+        main()
+    except Exception as e:
+        logger.error(f"Критическая ошибка: {e}")
+        sys.exit(1)
