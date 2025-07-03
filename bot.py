@@ -521,15 +521,15 @@ async def run_bot():
     finally:
         await cleanup()
 
-# Health check endpoint
-@app.route('/')
-def health_check():
-    return "Bot is running!", 200
-
 def main() -> None:
+    # Запускаем Flask-сервер в отдельном потоке
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    logger.info("Flask health check сервер запущен в отдельном потоке")
+    
     # Добавляем случайную задержку перед запуском (0-10 секунд)
     delay = random.uniform(0, 10)
-    logger.info(f"Ожидание {delay:.2f} секунд перед запуском...")
+    logger.info(f"Ожидание {delay:.2f} секунд перед запуском бота...")
     time.sleep(delay)
     
     if not TOKEN:
@@ -589,15 +589,8 @@ if __name__ == "__main__":
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
-        # Запускаем бота в отдельной задаче
-        bot_task = loop.create_task(run_bot())
-        
-        # Запускаем Flask в отдельном потоке
-        flask_thread = threading.Thread(target=run_flask, daemon=True)
-        flask_thread.start()
-        
-        logger.info("Приложение запущено")
-        logger.info(f"Health check доступен на порту {os.environ.get('PORT', 10000)}")
+        # Запускаем основную функцию
+        loop.run_until_complete(main())
         
         # Запускаем event loop
         loop.run_forever()
