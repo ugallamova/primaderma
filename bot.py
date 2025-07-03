@@ -22,6 +22,30 @@ from telegram.ext import (
     PicklePersistence
 )
 
+# --- LOCK FILE UTILITIES ---
+
+def acquire_lock(lock_file: str = "bot.lock"):
+    """Attempt to create a lock file and return the file handle.
+    If the lock file already exists, return None, indicating another instance is running."""
+    try:
+        lock_handle = open(lock_file, "x")  # exclusive creation
+        lock_handle.write(str(os.getpid()))
+        lock_handle.flush()
+        return lock_handle
+    except FileExistsError:
+        return None
+
+
+def release_lock(lock_handle):
+    """Release the lock by closing the handle and removing the lock file."""
+    try:
+        lock_file = lock_handle.name
+        lock_handle.close()
+        if os.path.exists(lock_file):
+            os.remove(lock_file)
+    except Exception as e:
+        logger.error(f"Ошибка при освобождении lock файла: {e}")
+
 # Initialize Flask app
 app = Flask(__name__)
 
