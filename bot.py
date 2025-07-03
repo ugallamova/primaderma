@@ -460,5 +460,25 @@ def main() -> None:
     logger.info("Запуск бота с новой архитектурой диалогов...")
     application.run_polling(drop_pending_updates=True)
 
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'OK')
+
+def run_health_check():
+    server_address = ('', int(os.environ.get('PORT', '10000')))
+    httpd = HTTPServer(server_address, HealthCheckHandler)
+    httpd.serve_forever()
+
 if __name__ == "__main__":
+    # Запускаем health check сервер в отдельном потоке
+    health_check_thread = threading.Thread(target=run_health_check, daemon=True)
+    health_check_thread.start()
+    
+    # Запускаем бота в основном потоке
     main()
