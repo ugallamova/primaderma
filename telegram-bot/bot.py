@@ -512,7 +512,7 @@ async def main():
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
     logger.info("Flask health check сервер запущен в отдельном потоке")
-        logger.info("--- Bot version: v2025.07.04-02.10-CACHE-BUST ---") # Принудительная очистка кэша
+    logger.info("--- Bot version: v2025.07.04-02.15-FIXED ---") # Ошибка отступа исправлена
 
     if not TOKEN:
         logger.critical("Токен бота не найден! Проверьте переменную окружения TOKEN.")
