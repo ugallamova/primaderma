@@ -12,6 +12,7 @@ from telegram.ext import (
     filters,
     CallbackContext,
     CallbackQueryHandler,
+    PicklePersistence
 )
 
 # --- Настройка логирования ---
@@ -310,7 +311,8 @@ def main() -> None:
         logger.critical("Токен бота не найден! Проверьте файл config.py.")
         return
 
-    application = Application.builder().token(TOKEN).build()
+    persistence = PicklePersistence(filepath="bot_persistence.pkl")
+    application = Application.builder().token(TOKEN).persistence(persistence).build()
 
     # --- Регистрация обработчиков ---
     application.add_handler(CommandHandler("start", start))
