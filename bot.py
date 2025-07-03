@@ -16,17 +16,25 @@ from telegram.ext import (
 )
 
 # --- Настройка логирования ---
-log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+# Настраиваем базовую конфигурацию для вывода в консоль с поддержкой UTF-8
 logging.basicConfig(
     level=logging.INFO,
-    format=log_format,
-    handlers=[
-        logging.FileHandler("primaderma_bot.log"),
-        logging.StreamHandler()
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    encoding='utf-8'  # Критически важно для Windows, чтобы эмодзи не ломали логи
 )
+
+# Добавляем обработчик для записи логов в файл, также с UTF-8
+file_handler = logging.FileHandler("primaderma_bot.log", encoding='utf-8')
+file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+logging.getLogger().addHandler(file_handler)
+
+# Уменьшаем "шум" от библиотек HTTP
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+# Получаем логгер для нашего модуля
 logger = logging.getLogger(__name__)
+logger.info("Логгирование успешно настроено.")
 
 # --- Константы для состояний ---
 STATE = "state"
@@ -82,14 +90,26 @@ async def main_menu_nav(update: Update, context: CallbackContext) -> None:
     await query.answer()
     logger.info(f"Пользователь {update.effective_user.id} вернулся в главное меню.")
     context.user_data.clear()
-    await query.edit_message_text(text="Чем могу быть полезен?", reply_markup=main_menu_keyboard())
+    await query.delete_message()
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Чем могу быть полезен?",
+        reply_markup=main_menu_keyboard()
+    )
 
 # --- КАТАЛОГ ПРОДУКТОВ ---
 async def show_products(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     await query.answer()
     logger.info(f"Пользователь {update.effective_user.id} вошел в каталог продуктов.")
-    await query.edit_message_text(text="Выберите интересующую вас категорию:", reply_markup=product_categories_keyboard())
+    keyboard = product_categories_keyboard()
+    logger.info(f"[DEBUG] Catalog keyboard: {keyboard.inline_keyboard}")
+    await query.delete_message()
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Выберите интересующую вас категорию:",
+        reply_markup=keyboard
+    )
 
 async def show_product_list_by_category(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
@@ -101,12 +121,24 @@ async def show_product_list_by_category(update: Update, context: CallbackContext
     products_in_category = [prod["name"] for prod in PRODUCT_DESCRIPTIONS.values() if prod.get("category") == category_name]
     
     if not products_in_category:
-        await query.edit_message_text(text="В этой категории пока нет продуктов.", reply_markup=product_categories_keyboard())
+        await query.delete_message()
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="В этой категории пока нет продуктов.",
+            reply_markup=product_categories_keyboard()
+        )
         return
 
     keyboard_buttons = [[InlineKeyboardButton(name, callback_data=f"product_{PRODUCT_NAME_TO_KEY[name]}")] for name in products_in_category]
     keyboard_buttons.append([InlineKeyboardButton("← Назад к категориям", callback_data="catalog")])
-    await query.edit_message_text(text="Выберите продукт:", reply_markup=InlineKeyboardMarkup(keyboard_buttons))
+    keyboard = InlineKeyboardMarkup(keyboard_buttons)
+    logger.info(f"[DEBUG] Product list keyboard: {keyboard.inline_keyboard}")
+    await query.delete_message()
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Выберите продукт:",
+        reply_markup=keyboard
+    )
 
 async def show_product_detail(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
@@ -121,32 +153,65 @@ async def show_product_detail(update: Update, context: CallbackContext) -> None:
             f"<b>{product_data['name']}</b>\n\n"
             f"<b>Описание:</b>\n{product_data['description']}\n\n"
             f"<b>Состав:</b>\n{product_data['ingredients']}\n\n"
-            f"<b>Способ применения:</b>\n{product_data['usage']}\n\n"
+            f"<b>Как использовать:</b>\n{product_data['usage']}\n\n"
             f"<b>Упаковка:</b>\n{product_data['packaging']}"
         )
         keyboard = [
             [InlineKeyboardButton("← Назад к списку продуктов", callback_data=f"category_{category_name}")],
             [InlineKeyboardButton("← Назад к категориям", callback_data="catalog")]
         ]
-        await query.edit_message_text(text=details_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+        await query.delete_message()
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=details_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='HTML'
+        )
     else:
         logger.warning(f"Продукт с ключом '{product_key}' не найден.")
-        await query.edit_message_text(text="Продукт не найден.", reply_markup=product_categories_keyboard())
+        await query.delete_message()
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Продукт не найден.",
+            reply_markup=product_categories_keyboard()
+        )
 
 # --- СОЦСЕТИ И МАГАЗИНЫ ---
 async def social_and_shops(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     await query.answer()
     logger.info(f"Пользователь {update.effective_user.id} запросил соцсети и магазины.")
-    text = "Подписывайтесь на нас в социальных сетях и покупайте нашу продукцию в лучших магазинах!"
+    
+    # Формируем текст сообщения с HTML-ссылками
+    text = (
+        "<b>Мы в социальных сетях:</b>\n"
+        "• <a href=\"https://www.instagram.com/primaderma.ru?igsh=ZmFiOWF0OWJzM2ti\">Instagram</a>\n"
+        "• <a href=\"https://vk.com/dermacare\">ВКонтакте</a>\n"
+        "• <a href=\"https://t.me/+AW87XFPmPesyZjZi\">Telegram</a>\n\n"
+        "<b>Наши магазины:</b>\n"
+        "• <a href=\"https://primaderma.ru/\">Официальный сайт</a>\n"
+        "• <a href=\"https://goldapple.ru/brands/primaderma\">Золотое Яблоко</a>\n"
+        "• <a href=\"https://www.letu.ru/brand/primaderma\">Летуаль</a>\n"
+        "• <a href=\"https://www.wildberries.ru/brands/310708162-primaderma\">Wildberries</a>\n"
+        "• <a href=\"https://www.ozon.ru/seller/dr-gallyamova-132298/?miniapp=seller_132298\">Ozon</a>"
+    )
+    
+    # Создаем клавиатуру только с кнопкой возврата в меню
     keyboard = [
-        [InlineKeyboardButton("Instagram", url="https://instagram.com/primaderma")],
-        [InlineKeyboardButton("Telegram-канал", url="https://t.me/primaderma_channel")],
-        [InlineKeyboardButton("Wildberries", url="https://www.wildberries.ru/brands/primaderma")],
-        [InlineKeyboardButton("Ozon", url="https://www.ozon.ru/seller/primaderma-289547/")],
         [InlineKeyboardButton("← В меню", callback_data="main_menu")]
     ]
-    await query.edit_message_text(text=text, reply_markup=InlineKeyboardMarkup(keyboard))
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Удаляем предыдущее сообщение и отправляем новое
+    await query.delete_message()
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=text,
+        reply_markup=reply_markup,
+        parse_mode='HTML',
+        disable_web_page_preview=True
+    )
 
 # --- ДИАЛОГИ (ПОДДЕРЖКА, АМБАССАДОР) ---
 async def start_support_dialog(update: Update, context: CallbackContext) -> None:
@@ -155,9 +220,12 @@ async def start_support_dialog(update: Update, context: CallbackContext) -> None
     logger.info(f"Пользователь {update.effective_user.id} начал диалог поддержки.")
     context.user_data[STATE] = SUPPORT_STATE
     keyboard = [[InlineKeyboardButton("← В меню", callback_data="main_menu")]]
-    await query.edit_message_text(text="Опишите ваш вопрос, и мы скоро свяжемся с вами.", reply_markup=InlineKeyboardMarkup(keyboard))
-
-
+    await query.delete_message()
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Напишите свой вопрос — я сразу передам его менеджеру.",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 async def start_ambassador_dialog(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
@@ -165,11 +233,12 @@ async def start_ambassador_dialog(update: Update, context: CallbackContext) -> N
     logger.info(f"Пользователь {update.effective_user.id} хочет стать амбассадором.")
     context.user_data[STATE] = AMBASSADOR_STATE
     keyboard = [[InlineKeyboardButton("← В меню", callback_data="main_menu")]]
-    await query.edit_message_text(text="Пожалуйста, отправьте ваше фото или резюме.", reply_markup=InlineKeyboardMarkup(keyboard))
-
-
-
-
+    await query.delete_message()
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Отлично, вы хотите стать амбассадором Primaderma! Чтобы мы вас рассмотрели, отправьте скриншот статистики вашего аккаунта (охват, подписчики, engagement).",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 # --- КВИЗ (с ручным управлением состоянием) ---
 async def product_quiz_start(update: Update, context: CallbackContext) -> None:
@@ -183,7 +252,14 @@ async def product_quiz_start(update: Update, context: CallbackContext) -> None:
         [InlineKeyboardButton("Жирная", callback_data="quiz_1_Жирная"), InlineKeyboardButton("Комбинированная", callback_data="quiz_1_Комбинированная")],
         [InlineKeyboardButton("← В меню", callback_data="main_menu")]
     ]
-    await query.edit_message_text(text="Шаг 1/3: Какой у вас тип кожи?", reply_markup=InlineKeyboardMarkup(keyboard))
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    logger.info(f"[DEBUG] Quiz keyboard (Q1): {reply_markup.inline_keyboard}")
+    await query.delete_message()
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Шаг 1/3: Какой у вас тип кожи?",
+        reply_markup=reply_markup
+    )
 
 async def handle_quiz_answer(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
@@ -199,24 +275,47 @@ async def handle_quiz_answer(update: Update, context: CallbackContext) -> None:
             [InlineKeyboardButton("Потеря упругости", callback_data="quiz_2_Потеря упругости"), InlineKeyboardButton("Тусклый цвет", callback_data="quiz_2_Тусклый цвет")],
             [InlineKeyboardButton("← В меню", callback_data="main_menu")]
         ]
-        await query.edit_message_text(text="Шаг 2/3: Какая проблема вас больше всего беспокоит?", reply_markup=InlineKeyboardMarkup(keyboard))
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        logger.info(f"[DEBUG] Quiz keyboard (Q2): {reply_markup.inline_keyboard}")
+        await query.delete_message()
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Шаг 2/3: Какая у вас основная проблема кожи?",
+            reply_markup=reply_markup
+        )
+    
     elif step == 2:
-        context.user_data['concern'] = answer
+        context.user_data['skin_concern'] = answer
         context.user_data[QUIZ_STEP] = 3
         keyboard = [
-            [InlineKeyboardButton("До 25", callback_data="quiz_3_До 25"), InlineKeyboardButton("25-35", callback_data="quiz_3_25-35")],
-            [InlineKeyboardButton("35-45", callback_data="quiz_3_35-45"), InlineKeyboardButton("45+", callback_data="quiz_3_45+")],
+            [InlineKeyboardButton("Да, регулярно", callback_data="quiz_3_Да"), InlineKeyboardButton("Иногда", callback_data="quiz_3_Иногда")],
+            [InlineKeyboardButton("Редко", callback_data="quiz_3_Редко"), InlineKeyboardButton("Нет, никогда", callback_data="quiz_3_Нет")],
             [InlineKeyboardButton("← В меню", callback_data="main_menu")]
         ]
-        await query.edit_message_text(text="Шаг 3/3: Укажите ваш возраст.", reply_markup=InlineKeyboardMarkup(keyboard))
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        logger.info(f"[DEBUG] Quiz keyboard (Q3): {reply_markup.inline_keyboard}")
+        await query.delete_message()
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Шаг 3/3: Используете ли вы сейчас какие-либо уходовые средства для лица?",
+            reply_markup=reply_markup
+        )
+    
     elif step == 3:
-        context.user_data['age_range'] = answer
-        concern = context.user_data.get('concern')
-        recommendation_text, recommended_product_key = ("Наш универсальный продукт - <b>Питьевой коллаген</b>.", "collagen")
-        if concern in ["Пигментация", "Тусклый цвет"]:
-            recommendation_text, recommended_product_key = ("Линейку <b>«Сияние кожи»</b>.", "glow_serum")
-        elif concern in ["Морщины", "Потеря упругости"]:
-            recommendation_text, recommended_product_key = ("Линейку <b>«Энергия клеток»</b>.", "cell_serum")
+        context.user_data['current_routine'] = answer
+        skin_type = context.user_data.get('skin_type', 'не указан')
+        skin_concern = context.user_data.get('skin_concern', 'не указана')
+        
+        # Логика рекомендации (упрощенная версия)
+        if skin_concern == "Морщины":
+            recommended_product_key = "cell_serum"
+            recommendation_text = "Для борьбы с морщинами мы рекомендуем нашу сыворотку 'Энергия клеток', которая помогает разглаживать морщины и улучшать текстуру кожи."
+        elif skin_concern == "Пигментация":
+            recommended_product_key = "glow_serum"
+            recommendation_text = "Для коррекции пигментации идеально подойдет наша сыворотка от пигментации, которая осветляет пигментные пятна и выравнивает тон кожи."
+        else:
+            recommended_product_key = "cell_cream"
+            recommendation_text = "Для вашего типа кожи мы рекомендуем наш крем 'Энергия клеток', который обеспечивает интенсивное увлажнение и питание."
         
         final_text = f"На основе ваших ответов, мы рекомендуем вам:\n\n{recommendation_text}"
         product_name = PRODUCT_DESCRIPTIONS[recommended_product_key]['name']
@@ -224,7 +323,13 @@ async def handle_quiz_answer(update: Update, context: CallbackContext) -> None:
             [InlineKeyboardButton(f"Посмотреть «{product_name}»", callback_data=f"product_{recommended_product_key}")],
             [InlineKeyboardButton("← В меню", callback_data="main_menu")]
         ]
-        await query.edit_message_text(text=final_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+        await query.delete_message()
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=final_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='HTML'
+        )
         context.user_data.clear()
 
 
@@ -295,7 +400,19 @@ async def handle_media_message(update: Update, context: CallbackContext) -> None
         file_id = update.message.document.file_id
         await context.bot.send_document(chat_id=ADMIN_ID, document=file_id, caption=caption)
 
-    await update.message.reply_text("Спасибо за вашу заявку! Мы скоро с вами свяжемся.", reply_markup=main_menu_keyboard())
+    # Улучшенное ответное сообщение
+    response_text = (
+        "✅ Спасибо! Ваши данные приняты.\n\n"
+        "Наша команда свяжется с вами в течение 48 ч для обсуждения условий сотрудничества.\n\n"
+        "Пока мы обрабатываем ваши данные, приглашаем вас погрузиться в мир PRIMADERMA и подобрать для себя идеальный продукт, который подчеркнёт вашу красоту кожи и волос.\n\n"
+        "🌐 Ознакомиться с продукцией: https://primaderma.ru/"
+    )
+    
+    await update.message.reply_text(
+        text=response_text,
+        reply_markup=main_menu_keyboard(),
+        disable_web_page_preview=True
+    )
     context.user_data.clear()
 
 async def unknown(update: Update, context: CallbackContext):
@@ -330,9 +447,11 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(product_quiz_start, pattern="^start_quiz$"))
 
     # Обработка ответов в диалогах
-    application.add_handler(CallbackQueryHandler(handle_quiz_answer, pattern="^quiz_"))
+    application.add_handler(CallbackQueryHandler(handle_quiz_answer, pattern="^quiz_\\d+"))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, dispatch_text_message))
     application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media_message))
+    
+    # Обработчик ошибок
     application.add_error_handler(error_handler)
     
     # Обработчик неизвестных команд должен быть последним
