@@ -505,66 +505,35 @@ async def cleanup():
         await application.shutdown()
         logger.info("Бот успешно остановлен")
 
-async def setup_application() -> Application:
-    """Настройка и возврат экземпляра Application"""
-    logger.info("Настройка приложения бота...")
-    
-    if not TOKEN:
-        logger.critical("Токен бота не найден! Проверьте файл config.py.")
-        raise ValueError("Токен бота не найден")
-    
-    # Создаем приложение с сохранением состояния
-    persistence = PicklePersistence(filepath="bot_persistence.pkl")
-    application = Application.builder()\
-        .token(TOKEN)\
-        .persistence(persistence)\
-        .build()
-    
-    # Добавляем обработчики команд
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", show_help))
-    
-    # Обработчики сообщений
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, dispatch_text_message))
-    
-    # Обработчики колбэков
-    application.add_handler(CallbackQueryHandler(button_callback))
-    
-    # Обработчики ошибок
-    application.add_error_handler(error_handler)
-    
-    return application
+def register_handlers(application: Application):
+    """Registers all the handlers for the bot."""
+    logger.info("Registering handlers...")
 
-async def run_bot():
-    """Запуск бота с обработкой ошибок"""
-    global application
-    try:
-        # Настраиваем приложение
-        application = await setup_application()
-        logger.info("Бот запускается...")
-        
-        # Запускаем бота с long polling
-        await application.initialize()
-        await application.start()
-        await application.updater.start_polling(
-            drop_pending_updates=True,
-            allowed_updates=Update.ALL_TYPES
-        )
-        
-        logger.info("Бот запущен и работает")
-        
-        # Держим бота запущенным
-        while True:
-            await asyncio.sleep(3600)  # Спим 1 час
-            
-    except asyncio.CancelledError:
-        logger.info("Получен запрос на остановку бота")
-        raise
-    except Exception as e:
-        logger.error(f"Ошибка при работе бота: {e}", exc_info=True)
-        raise
-    finally:
-        await cleanup()
+    # Command handlers
+    application.add_handler(CommandHandler("start", start))
+
+    # Callback query handlers
+    application.add_handler(CallbackQueryHandler(main_menu_nav, pattern="^main_menu$"))
+    application.add_handler(CallbackQueryHandler(show_products, pattern="^catalog$"))
+    application.add_handler(CallbackQueryHandler(show_product_list_by_category, pattern=r"^category_"))
+    application.add_handler(CallbackQueryHandler(show_product_detail, pattern=r"^product_"))
+    application.add_handler(CallbackQueryHandler(social_and_shops, pattern="^social$"))
+    application.add_handler(CallbackQueryHandler(start_support_dialog, pattern="^support$"))
+    application.add_handler(CallbackQueryHandler(start_ambassador_dialog, pattern="^ambassador$"))
+    application.add_handler(CallbackQueryHandler(product_quiz_start, pattern="^start_quiz$"))
+    application.add_handler(CallbackQueryHandler(handle_quiz_answer, pattern=r"^quiz_"))
+
+    # Message handlers
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, dispatch_text_message))
+    application.add_handler(MessageHandler(filters.PHOTO | filters.DOCUMENT, handle_media_message))
+    
+    # Unknown command handler must be last
+    application.add_handler(MessageHandler(filters.COMMAND, unknown))
+
+    # Error handler
+    application.add_error_handler(error_handler)
+    logger.info("Handlers registered successfully.")
+
 
 async def main():
     """Основная асинхронная функция для запуска бота"""
@@ -592,8 +561,9 @@ async def main():
             logger.critical("Токен бота не найден! Проверьте файл config.py.")
             return None
             
-        # Создаем приложение
-        application = Application.builder().token(TOKEN).build()
+        # Создаем приложение с сохранением состояния
+        persistence = PicklePersistence(filepath="bot_persistence.pkl")
+        application = Application.builder().token(TOKEN).persistence(persistence).build()
         
         # Регистрируем обработчики
         register_handlers(application)
@@ -617,7 +587,7 @@ async def main():
         
         # Бесконечный цикл для поддержания работы бота
         while True:
-            await asyncio.sleep(3600)  # Спим по часу, чтобы не нагружать процессор
+            await asyncio.sleep(3600)
             
     except asyncio.CancelledError:
         logger.info("Получен сигнал на завершение работы...")
