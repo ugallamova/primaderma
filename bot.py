@@ -19,8 +19,7 @@ from telegram.ext import (
     filters,
     CallbackContext,
     CallbackQueryHandler,
-    PicklePersistence,
-    Update
+    PicklePersistence
 )
 
 # Initialize Flask app
