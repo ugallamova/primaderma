@@ -386,7 +386,7 @@ async def dispatch_text_message(update: Update, context: CallbackContext) -> Non
     user = update.effective_user
     
     # Ветка 1: Сообщение от Админа, и это ответ на другое сообщение.
-    if user.id == int(ADMIN_ID) and update.message.reply_to_message:
+    if user.id == ADMIN_ID and update.message.reply_to_message:
         replied_message = update.message.reply_to_message
         original_user_id = None
         
@@ -425,7 +425,7 @@ async def dispatch_text_message(update: Update, context: CallbackContext) -> Non
         text = update.message.text
         if user_state == SUPPORT_STATE:
             logger.info(f"Получено сообщение для поддержки от {user.id}: {text}")
-            await context.bot.send_message(chat_id=ADMIN_ID, text=f"Новый вопрос в поддержку от @{user.username} [user_id={user.id}]:\n\n{text}")
+            await context.bot.send_message(chat_id=int(ADMIN_ID), text=f"Новый вопрос в поддержку от @{user.username} [user_id={user.id}]:\n\n{text}")
             await update.message.reply_text("Спасибо! Ваше сообщение передано администратору.", reply_markup=main_menu_keyboard())
         
         context.user_data.clear()
@@ -442,10 +442,10 @@ async def handle_media_message(update: Update, context: CallbackContext) -> None
 
     if update.message.photo:
         file_id = update.message.photo[-1].file_id
-        await context.bot.send_photo(chat_id=ADMIN_ID, photo=file_id, caption=caption)
+        await context.bot.send_photo(chat_id=int(ADMIN_ID), photo=file_id, caption=caption)
     elif update.message.document:
         file_id = update.message.document.file_id
-        await context.bot.send_document(chat_id=ADMIN_ID, document=file_id, caption=caption)
+        await context.bot.send_document(chat_id=int(ADMIN_ID), document=file_id, caption=caption)
 
     # Улучшенное ответное сообщение
     response_text = (
@@ -514,7 +514,11 @@ async def main():
     logger.info("Flask health check сервер запущен в отдельном потоке")
 
     if not TOKEN:
-        logger.critical("Токен бота не найден! Проверьте файл config.py.")
+        logger.critical("Токен бота не найден! Проверьте переменную окружения TOKEN.")
+        return
+
+    if not ADMIN_ID:
+        logger.critical("ID администратора не найден! Проверьте переменную окружения ADMIN_ID.")
         return
 
     # Создаем приложение с сохранением состояния
