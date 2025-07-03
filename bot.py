@@ -483,42 +483,49 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b'OK')
 
+# Глобальная переменная для управления состоянием сервера
+httpd = None
+
 def run_health_check():
+    global httpd
     server_address = ('', int(os.environ.get('PORT', '10000')))
     httpd = HTTPServer(server_address, HealthCheckHandler)
-    
-    def graceful_shutdown(signum, frame):
-        logger.info("Остановка health check сервера...")
-        httpd.shutdown()
-        httpd.server_close()
-        sys.exit(0)
-    
-    # Устанавливаем обработчики сигналов
-    signal.signal(signal.SIGTERM, graceful_shutdown)
-    signal.signal(signal.SIGINT, graceful_shutdown)
     
     logger.info(f"Запуск health check сервера на порту {server_address[1]}")
     httpd.serve_forever()
 
 def signal_handler(signum, frame):
     logger.info(f"Получен сигнал {signum}, завершение работы...")
-    # Application.stop() остановит поллинг и закроет event loop
+    
+    # Останавливаем HTTP сервер, если он запущен
+    global httpd
+    if httpd:
+        logger.info("Остановка health check сервера...")
+        httpd.shutdown()
+        httpd.server_close()
+    
+    # Останавливаем бота
     if 'application' in globals():
+        logger.info("Остановка бота...")
         application.stop()
+    
     sys.exit(0)
 
 if __name__ == "__main__":
-    # Устанавливаем обработчики сигналов
+    # Устанавливаем обработчики сигналов только в основном потоке
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
     
+    # Запускаем health check сервер в отдельном потоке
+    health_check_thread = threading.Thread(target=run_health_check, daemon=True)
+    health_check_thread.start()
+    
     try:
-        # Запускаем health check сервер в отдельном потоке
-        health_check_thread = threading.Thread(target=run_health_check, daemon=True)
-        health_check_thread.start()
-        
         # Запускаем бота в основном потоке
         main()
     except Exception as e:
         logger.error(f"Критическая ошибка: {e}")
-        sys.exit(1)
+        signal_handler(signal.SIGTERM, None)  # Вызываем обработчик сигнала для корректного завершения
+    except KeyboardInterrupt:
+        logger.info("Получен сигнал прерывания с клавиатуры")
+        signal_handler(signal.SIGINT, None)
