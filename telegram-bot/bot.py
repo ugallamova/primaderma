@@ -506,7 +506,7 @@ def register_handlers(application: Application):
     logger.info("Handlers registered successfully.")
 
 
-async def main():
+def main():
     """Основная асинхронная функция для запуска бота"""
     # Запускаем Flask-сервер в отдельном потоке
     flask_thread = threading.Thread(target=run_flask, daemon=True)
@@ -532,12 +532,12 @@ async def main():
     # Запускаем бота в режиме опроса.
     # Этот метод автоматически обрабатывает запуск, остановку и корректное завершение.
     logger.info("Запуск бота в режиме опроса...")
-    await application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        main()
     except (KeyboardInterrupt, SystemExit):
         logger.info("Бот остановлен.")
     except Exception as e:
