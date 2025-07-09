@@ -91,17 +91,7 @@ QUIZ_STATE = "quiz"
 QUIZ_STEP = "quiz_step"
 
 # --- СТРУКТУРЫ ДАННЫХ ---
-PRODUCT_DESCRIPTIONS = {
-    "cell_cleanser": {"name": "Пенка для умывания «Нежность орхидеи»", "category": "Энергия клеток", "description": "...", "ingredients": "...", "usage": "...", "packaging": "..."},
-    "cell_cream": {"name": "Крем для лица «Энергия клеток»", "category": "Энергия клеток", "description": "...", "ingredients": "...", "usage": "...", "packaging": "..."},
-    "cell_serum": {"name": "Сыворотка «Энергия клеток»", "category": "Энергия клеток", "description": "...", "ingredients": "...", "usage": "...", "packaging": "..."},
-    "cell_eye_cream": {"name": "Крем для кожи вокруг глаз и губ", "category": "Энергия клеток", "description": "...", "ingredients": "...", "usage": "...", "packaging": "..."},
-    "glow_cream": {"name": "Крем от пигментации", "category": "Сияние кожи", "description": "...", "ingredients": "...", "usage": "...", "packaging": "..."},
-    "glow_serum": {"name": "Сыворотка от пигментации", "category": "Сияние кожи", "description": "...", "ingredients": "...", "usage": "...", "packaging": "..."},
-    "hair_loss_lotion": {"name": "Лосьон от выпадения волос", "category": "Сила волос", "description": "...", "ingredients": "...", "usage": "...", "packaging": "..."},
-    "hair_growth_lotion": {"name": "Лосьон для роста волос", "category": "Сила волос", "description": "...", "ingredients": "...", "usage": "...", "packaging": "..."},
-    "collagen": {"name": "Питьевой коллаген с пептидами", "category": "Питьевой коллаген", "description": "...", "ingredients": "...", "usage": "...", "packaging": "..."},
-}
+from product_data import PRODUCT_DESCRIPTIONS
 PRODUCT_NAME_TO_KEY = {v['name']: k for k, v in PRODUCT_DESCRIPTIONS.items()}
 
 # --- КЛАВИАТУРЫ (Inline) ---
@@ -196,13 +186,24 @@ async def show_product_detail(update: Update, context: CallbackContext) -> None:
 
     if product_data:
         category_name = product_data.get('category')
+        
+        # Формируем текст с деталями, включая новые поля
         details_text = (
-            f"<b>{product_data['name']}</b>\n\n"
-            f"<b>Описание:</b>\n{product_data['description']}\n\n"
-            f"<b>Состав:</b>\n{product_data['ingredients']}\n\n"
-            f"<b>Как использовать:</b>\n{product_data['usage']}\n\n"
-            f"<b>Упаковка:</b>\n{product_data['packaging']}"
+            f"<b>{product_data.get('name', 'Название не указано')}</b>\n\n"
+            f"<b>Описание:</b>\n{product_data.get('description', 'Нет описания')}\n\n"
+            f"<b>Состав:</b>\n{product_data.get('ingredients', 'Состав не указан')}\n\n"
+            f"<b>Как использовать:</b>\n{product_data.get('usage', 'Инструкция по применению не указана')}\n\n"
+            f"<b>Упаковка:</b>\n{product_data.get('packaging', 'Информация об упаковке отсутствует')}"
         )
+
+        # Добавляем опциональные поля, если они существуют
+        if product_data.get('storage_conditions'):
+            details_text += f"\n\n<b>Условия хранения:</b>\n{product_data['storage_conditions']}"
+        if product_data.get('shelf_life'):
+            details_text += f"\n\n<b>Срок годности:</b>\n{product_data['shelf_life']}"
+        if product_data.get('gost'):
+            details_text += f"\n\n<b>ГОСТ:</b>\n{product_data['gost']}"
+
         keyboard = [
             [InlineKeyboardButton("← Назад к списку продуктов", callback_data=f"category_{category_name}")],
             [InlineKeyboardButton("← Назад к категориям", callback_data="catalog")]
@@ -210,7 +211,7 @@ async def show_product_detail(update: Update, context: CallbackContext) -> None:
         await query.delete_message()
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text=details_text,
+            text=details_text.strip(),
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='HTML'
         )
