@@ -25,9 +25,9 @@ export default function Home() {
           </li>
         </ol>
 
-        <div className="grid gap-4 sm:flex sm:flex-row">
+        <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
           <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base min-h-10 sm:min-h-12 px-4 sm:px-5 py-2 w-full sm:w-auto"
+            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base px-4 sm:px-5 py-3 w-full"
             href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
             target="_blank"
             rel="noopener noreferrer"
@@ -42,7 +42,7 @@ export default function Home() {
             Deploy now
           </a>
           <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base min-h-10 sm:min-h-12 px-4 sm:px-5 py-2 w-full sm:w-auto md:w-[158px]"
+            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base px-4 sm:px-5 py-3 w-full"
             href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
             target="_blank"
             rel="noopener noreferrer"

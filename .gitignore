@@ -1,18 +1,44 @@
-# Python specific
+# Python
 __pycache__/
-*.pyc
-venv/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Logs and databases
+*.log
+*.sql
+*.sqlite
 
 # Environment variables
-.env*
+.env
+.venv
+env/
+venv/
+ENV/
 
-# Telegram bot state
-bot_persistence.pkl
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# Log files
-*.log
-
-# Misc
+# Project specific
+*.pkl
 .DS_Store
-*.pem
-node_modules

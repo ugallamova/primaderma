@@ -22,29 +22,7 @@ from telegram.ext import (
     PicklePersistence
 )
 
-# --- LOCK FILE UTILITIES ---
 
-def acquire_lock(lock_file: str = "bot.lock"):
-    """Attempt to create a lock file and return the file handle.
-    If the lock file already exists, return None, indicating another instance is running."""
-    try:
-        lock_handle = open(lock_file, "x")  # exclusive creation
-        lock_handle.write(str(os.getpid()))
-        lock_handle.flush()
-        return lock_handle
-    except FileExistsError:
-        return None
-
-
-def release_lock(lock_handle):
-    """Release the lock by closing the handle and removing the lock file."""
-    try:
-        lock_file = lock_handle.name
-        lock_handle.close()
-        if os.path.exists(lock_file):
-            os.remove(lock_file)
-    except Exception as e:
-        logger.error(f"Ошибка при освобождении lock файла: {e}")
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -113,32 +91,26 @@ QUIZ_STATE = "quiz"
 QUIZ_STEP = "quiz_step"
 
 # --- СТРУКТУРЫ ДАННЫХ ---
-PRODUCT_DESCRIPTIONS = {
-    "cell_cleanser": {"name": "Пенка для умывания «Нежность орхидеи»", "category": "Энергия клеток", "description": "...", "ingredients": "...", "usage": "...", "packaging": "..."},
-    "cell_cream": {"name": "Крем для лица «Энергия клеток»", "category": "Энергия клеток", "description": "...", "ingredients": "...", "usage": "...", "packaging": "..."},
-    "cell_serum": {"name": "Сыворотка «Энергия клеток»", "category": "Энергия клеток", "description": "...", "ingredients": "...", "usage": "...", "packaging": "..."},
-    "cell_eye_cream": {"name": "Крем для кожи вокруг глаз и губ", "category": "Энергия клеток", "description": "...", "ingredients": "...", "usage": "...", "packaging": "..."},
-    "glow_cream": {"name": "Крем от пигментации", "category": "Сияние кожи", "description": "...", "ingredients": "...", "usage": "...", "packaging": "..."},
-    "glow_serum": {"name": "Сыворотка от пигментации", "category": "Сияние кожи", "description": "...", "ingredients": "...", "usage": "...", "packaging": "..."},
-    "hair_loss_lotion": {"name": "Лосьон от выпадения волос", "category": "Сила волос", "description": "...", "ingredients": "...", "usage": "...", "packaging": "..."},
-    "hair_growth_lotion": {"name": "Лосьон для роста волос", "category": "Сила волос", "description": "...", "ingredients": "...", "usage": "...", "packaging": "..."},
-    "collagen": {"name": "Питьевой коллаген с пептидами", "category": "Питьевой коллаген", "description": "...", "ingredients": "...", "usage": "...", "packaging": "..."},
-}
+from product_data import PRODUCT_DESCRIPTIONS
 PRODUCT_NAME_TO_KEY = {v['name']: k for k, v in PRODUCT_DESCRIPTIONS.items()}
 
 # --- КЛАВИАТУРЫ (Inline) ---
 def main_menu_keyboard() -> InlineKeyboardMarkup:
     keyboard = [
-        [InlineKeyboardButton("🛍️ Каталог продуктов", callback_data="catalog"), InlineKeyboardButton("👩‍⚕️ Помощник по подбору", callback_data="start_quiz")],
-        [InlineKeyboardButton("💬 Связаться с нами", callback_data="support"), InlineKeyboardButton("🤝 Стать амбассадором", callback_data="ambassador")],
+        [InlineKeyboardButton("🛍️ Каталог продуктов", callback_data="catalog")],
+        [InlineKeyboardButton("👩‍⚕️ Помощник по подбору", callback_data="start_quiz")],
+        [InlineKeyboardButton("💬 Связаться с нами", callback_data="support")],
+        [InlineKeyboardButton("🤝 Стать амбассадором", callback_data="ambassador")],
         [InlineKeyboardButton("🔗 Соцсети и магазины", callback_data="social")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def product_categories_keyboard() -> InlineKeyboardMarkup:
     keyboard = [
-        [InlineKeyboardButton("💫 Энергия клеток", callback_data="category_Энергия клеток"), InlineKeyboardButton("✨ Сияние кожи", callback_data="category_Сияние кожи")],
-        [InlineKeyboardButton("💇‍♀️ Сила волос", callback_data="category_Сила волос"), InlineKeyboardButton("🥤 Питьевой коллаген", callback_data="category_Питьевой коллаген")],
+        [InlineKeyboardButton("💫 Энергия клеток", callback_data="category_Энергия клеток")],
+        [InlineKeyboardButton("✨ Сияние кожи", callback_data="category_Сияние кожи")],
+        [InlineKeyboardButton("💇‍♀️ Сила волос", callback_data="category_Сила волос")],
+        [InlineKeyboardButton("🥤 Питьевой коллаген", callback_data="category_Питьевой коллаген")],
         [InlineKeyboardButton("← В меню", callback_data="main_menu")]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -212,27 +184,52 @@ async def show_product_list_by_category(update: Update, context: CallbackContext
 async def show_product_detail(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     await query.answer()
-    product_key = query.data.split('_', 1)[1]
+
+    # Определяем, откуда пришел пользователь (из квиза или каталога)
+    data = query.data
+    origin = None
+    product_key = None
+
+    if '_origin_' in data:
+        product_part, origin_part = data.split('_origin_')
+        product_key = product_part.split('_', 1)[1]
+        origin = origin_part
+    else:
+        product_key = data.split('_', 1)[1]
+
     product_data = PRODUCT_DESCRIPTIONS.get(product_key)
-    logger.info(f"Пользователь {update.effective_user.id} запросил детали о продукте: {product_key}")
+    logger.info(f"Пользователь {update.effective_user.id} запросил детали о продукте: {product_key} (из {origin or 'каталога'})")
 
     if product_data:
-        category_name = product_data.get('category')
         details_text = (
-            f"<b>{product_data['name']}</b>\n\n"
-            f"<b>Описание:</b>\n{product_data['description']}\n\n"
-            f"<b>Состав:</b>\n{product_data['ingredients']}\n\n"
-            f"<b>Как использовать:</b>\n{product_data['usage']}\n\n"
-            f"<b>Упаковка:</b>\n{product_data['packaging']}"
+            f"<b>{product_data.get('name', 'Название не указано')}</b>\n\n"
+            f"<b>Описание:</b>\n{product_data.get('description', 'Нет описания')}\n\n"
+            f"<b>Состав:</b>\n{product_data.get('ingredients', 'Состав не указан')}\n\n"
+            f"<b>Как использовать:</b>\n{product_data.get('usage', 'Инструкция по применению не указана')}\n\n"
+            f"<b>Упаковка:</b>\n{product_data.get('packaging', 'Информация об упаковке отсутствует')}"
         )
-        keyboard = [
-            [InlineKeyboardButton("← Назад к списку продуктов", callback_data=f"category_{category_name}")],
-            [InlineKeyboardButton("← Назад к категориям", callback_data="catalog")]
-        ]
+
+        if product_data.get('storage_conditions'):
+            details_text += f"\n\n<b>Условия хранения:</b>\n{product_data['storage_conditions']}"
+        if product_data.get('shelf_life'):
+            details_text += f"\n\n<b>Срок годности:</b>\n{product_data['shelf_life']}"
+        if product_data.get('gost'):
+            details_text += f"\n\n<b>ГОСТ:</b>\n{product_data['gost']}"
+
+        # Создаем клавиатуру в зависимости от контекста
+        if origin:
+            keyboard = [[InlineKeyboardButton("← Назад (к результатам квиза)", callback_data=f"quiz_result_{origin}")]]
+        else:
+            category_name = product_data.get('category')
+            keyboard = [
+                [InlineKeyboardButton("← Назад к списку продуктов", callback_data=f"category_{category_name}")],
+                [InlineKeyboardButton("← Назад к категориям", callback_data="catalog")]
+            ]
+
         await query.delete_message()
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text=details_text,
+            text=details_text.strip(),
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='HTML'
         )
@@ -260,7 +257,7 @@ async def social_and_shops(update: Update, context: CallbackContext) -> None:
         "<b>Наши магазины:</b>\n"
         "• <a href=\"https://primaderma.ru/\">Официальный сайт</a>\n"
         "• <a href=\"https://goldapple.ru/brands/primaderma\">Золотое Яблоко</a>\n"
-        "• <a href=\"https://www.letu.ru/brand/primaderma\">Летуаль</a>\n"
+        "• <a href=\"https://letu.ru/brand/primaderma\">Летуаль</a>\n"
         "• <a href=\"https://www.wildberries.ru/brands/310708162-primaderma\">Wildberries</a>\n"
         "• <a href=\"https://www.ozon.ru/seller/dr-gallyamova-132298/?miniapp=seller_132298\">Ozon</a>"
     )
@@ -314,93 +311,93 @@ async def product_quiz_start(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     await query.answer()
     logger.info(f"Пользователь {update.effective_user.id} начал квиз.")
-    context.user_data[STATE] = QUIZ_STATE
-    context.user_data[QUIZ_STEP] = 1
+
+    text = (
+        "Давайте подберём средство в формате небольшой игры-вопросов.\n\n"
+        "Выберите, что вас беспокоит:"
+    )
+
     keyboard = [
-        [InlineKeyboardButton("Сухая", callback_data="quiz_1_Сухая"), InlineKeyboardButton("Нормальная", callback_data="quiz_1_Нормальная")],
-        [InlineKeyboardButton("Жирная", callback_data="quiz_1_Жирная"), InlineKeyboardButton("Комбинированная", callback_data="quiz_1_Комбинированная")],
+        [InlineKeyboardButton("Сухость, потеря упругости", callback_data="quiz_result_cells")],
+        [InlineKeyboardButton("Пигментация, неровный тон, постакне", callback_data="quiz_result_glow")],
+        [InlineKeyboardButton("Выпадение волос, восстановление волос", callback_data="quiz_result_hair")],
         [InlineKeyboardButton("← В меню", callback_data="main_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    logger.info(f"[DEBUG] Quiz keyboard (Q1): {reply_markup.inline_keyboard}")
-    await query.delete_message()
+
+    # Если сообщение было, удаляем. Если нет, отправляем новое.
+    if query.message:
+        await query.delete_message()
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text="Шаг 1/3: Какой у вас тип кожи?",
+        text=text,
         reply_markup=reply_markup
     )
 
-async def handle_quiz_answer(update: Update, context: CallbackContext) -> None:
+async def handle_quiz_result(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     await query.answer()
-    step, answer = query.data.split('_')[1:]
-    step = int(step)
+    user_id = update.effective_user.id
+    choice = query.data.split('_')[-1]
+    logger.info(f"Пользователь {user_id} выбрал в квизе: {choice}")
 
-    if step == 1:
-        context.user_data['skin_type'] = answer
-        context.user_data[QUIZ_STEP] = 2
-        keyboard = [
-            [InlineKeyboardButton("Морщины", callback_data="quiz_2_Морщины"), InlineKeyboardButton("Пигментация", callback_data="quiz_2_Пигментация")],
-            [InlineKeyboardButton("Потеря упругости", callback_data="quiz_2_Потеря упругости"), InlineKeyboardButton("Тусклый цвет", callback_data="quiz_2_Тусклый цвет")],
-            [InlineKeyboardButton("← В меню", callback_data="main_menu")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        logger.info(f"[DEBUG] Quiz keyboard (Q2): {reply_markup.inline_keyboard}")
-        await query.delete_message()
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="Шаг 2/3: Какая у вас основная проблема кожи?",
-            reply_markup=reply_markup
-        )
-    
-    elif step == 2:
-        context.user_data['skin_concern'] = answer
-        context.user_data[QUIZ_STEP] = 3
-        keyboard = [
-            [InlineKeyboardButton("Да, регулярно", callback_data="quiz_3_Да"), InlineKeyboardButton("Иногда", callback_data="quiz_3_Иногда")],
-            [InlineKeyboardButton("Редко", callback_data="quiz_3_Редко"), InlineKeyboardButton("Нет, никогда", callback_data="quiz_3_Нет")],
-            [InlineKeyboardButton("← В меню", callback_data="main_menu")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        logger.info(f"[DEBUG] Quiz keyboard (Q3): {reply_markup.inline_keyboard}")
-        await query.delete_message()
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="Шаг 3/3: Используете ли вы сейчас какие-либо уходовые средства для лица?",
-            reply_markup=reply_markup
-        )
-    
-    elif step == 3:
-        context.user_data['current_routine'] = answer
-        skin_type = context.user_data.get('skin_type', 'не указан')
-        skin_concern = context.user_data.get('skin_concern', 'не указана')
-        
-        # Логика рекомендации (упрощенная версия)
-        if skin_concern == "Морщины":
-            recommended_product_key = "cell_serum"
-            recommendation_text = "Для борьбы с морщинами мы рекомендуем нашу сыворотку 'Энергия клеток', которая помогает разглаживать морщины и улучшать текстуру кожи."
-        elif skin_concern == "Пигментация":
-            recommended_product_key = "glow_serum"
-            recommendation_text = "Для коррекции пигментации идеально подойдет наша сыворотка от пигментации, которая осветляет пигментные пятна и выравнивает тон кожи."
-        else:
-            recommended_product_key = "cell_cream"
-            recommendation_text = "Для вашего типа кожи мы рекомендуем наш крем 'Энергия клеток', который обеспечивает интенсивное увлажнение и питание."
-        
-        final_text = f"На основе ваших ответов, мы рекомендуем вам:\n\n{recommendation_text}"
-        product_name = PRODUCT_DESCRIPTIONS[recommended_product_key]['name']
-        keyboard = [
-            [InlineKeyboardButton(f"Посмотреть «{product_name}»", callback_data=f"product_{recommended_product_key}")],
-            [InlineKeyboardButton("← В меню", callback_data="main_menu")]
-        ]
-        await query.delete_message()
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=final_text,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='HTML'
-        )
-        context.user_data.clear()
+    text = ""
+    keyboard = []
 
+    if choice == 'cells':
+        text = (
+            "Вам подойдёт линия «Энергия клеток».\n\n"
+            "• Крем «Энергия клеток»\n"
+            "• Сыворотка «Энергия клеток»\n"
+            "• Крем для кожи вокруг глаз и губ\n"
+            "• Пенка для умывания\n"
+            "• Коллаген\n\n"
+            "Хотите узнать подробности о каждом?"
+        )
+        keyboard = [
+            [InlineKeyboardButton("Крем для лица", callback_data="product_cell_cream_origin_cells")],
+            [InlineKeyboardButton("Сыворотка", callback_data="product_cell_serum_origin_cells")],
+            [InlineKeyboardButton("Пенка", callback_data="product_cell_cleanser_origin_cells")],
+            [InlineKeyboardButton("Крем для глаз и губ", callback_data="product_cell_eye_cream_origin_cells")],
+            [InlineKeyboardButton("Коллаген", callback_data="product_collagen_origin_cells")],
+            [InlineKeyboardButton("← Назад (к выбору проблемы)", callback_data="start_quiz")]
+        ]
+    elif choice == 'glow':
+        text = (
+            "Линия «Сияние кожи»:\n\n"
+            "• Крем от пигментации\n"
+            "• Сыворотка от пигментации\n"
+            "• Коллаген\n\n"
+            "Хотите описание состава и применения?"
+        )
+        keyboard = [
+            [InlineKeyboardButton("Крем от пигментации", callback_data="product_glow_cream_origin_glow")],
+            [InlineKeyboardButton("Сыворотка от пигментации", callback_data="product_glow_serum_origin_glow")],
+            [InlineKeyboardButton("Коллаген", callback_data="product_collagen_origin_glow")],
+            [InlineKeyboardButton("← Назад (к выбору проблемы)", callback_data="start_quiz")]
+        ]
+    elif choice == 'hair':
+        text = (
+            "Линия «Сила волос»:\n\n"
+            "• Лосьон от выпадения волос\n"
+            "• Лосьон для роста волос\n"
+            "• Коллаген\n\n"
+            "Хотите узнать подробнее?"
+        )
+        keyboard = [
+            [InlineKeyboardButton("Лосьон от выпадения", callback_data="product_hair_loss_lotion_origin_hair")],
+            [InlineKeyboardButton("Лосьон для роста", callback_data="product_hair_growth_lotion_origin_hair")],
+            [InlineKeyboardButton("Коллаген", callback_data="product_collagen_origin_hair")],
+            [InlineKeyboardButton("← Назад (к выбору проблемы)", callback_data="start_quiz")]
+        ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.delete_message()
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=text,
+        reply_markup=reply_markup
+    )
 
 
 # --- АДМИНКА И ОБРАБОТКА СООБЩЕНИЙ ---
@@ -408,7 +405,7 @@ async def dispatch_text_message(update: Update, context: CallbackContext) -> Non
     user = update.effective_user
     
     # Ветка 1: Сообщение от Админа, и это ответ на другое сообщение.
-    if user.id == int(ADMIN_ID) and update.message.reply_to_message:
+    if user.id == ADMIN_ID and update.message.reply_to_message:
         replied_message = update.message.reply_to_message
         original_user_id = None
         
@@ -447,7 +444,7 @@ async def dispatch_text_message(update: Update, context: CallbackContext) -> Non
         text = update.message.text
         if user_state == SUPPORT_STATE:
             logger.info(f"Получено сообщение для поддержки от {user.id}: {text}")
-            await context.bot.send_message(chat_id=ADMIN_ID, text=f"Новый вопрос в поддержку от @{user.username} [user_id={user.id}]:\n\n{text}")
+            await context.bot.send_message(chat_id=int(ADMIN_ID), text=f"Новый вопрос в поддержку от @{user.username} [user_id={user.id}]:\n\n{text}")
             await update.message.reply_text("Спасибо! Ваше сообщение передано администратору.", reply_markup=main_menu_keyboard())
         
         context.user_data.clear()
@@ -464,10 +461,10 @@ async def handle_media_message(update: Update, context: CallbackContext) -> None
 
     if update.message.photo:
         file_id = update.message.photo[-1].file_id
-        await context.bot.send_photo(chat_id=ADMIN_ID, photo=file_id, caption=caption)
+        await context.bot.send_photo(chat_id=int(ADMIN_ID), photo=file_id, caption=caption)
     elif update.message.document:
         file_id = update.message.document.file_id
-        await context.bot.send_document(chat_id=ADMIN_ID, document=file_id, caption=caption)
+        await context.bot.send_document(chat_id=int(ADMIN_ID), document=file_id, caption=caption)
 
     # Улучшенное ответное сообщение
     response_text = (
@@ -496,14 +493,7 @@ async def error_handler(update: object, context: CallbackContext) -> None:
             reply_markup=main_menu_keyboard()
         )
 
-async def cleanup():
-    """Функция для очистки ресурсов при завершении работы"""
-    global application
-    if application and application.running:
-        logger.info("Остановка бота...")
-        await application.stop()
-        await application.shutdown()
-        logger.info("Бот успешно остановлен")
+
 
 def register_handlers(application: Application):
     """Registers all the handlers for the bot."""
@@ -521,7 +511,7 @@ def register_handlers(application: Application):
     application.add_handler(CallbackQueryHandler(start_support_dialog, pattern="^support$"))
     application.add_handler(CallbackQueryHandler(start_ambassador_dialog, pattern="^ambassador$"))
     application.add_handler(CallbackQueryHandler(product_quiz_start, pattern="^start_quiz$"))
-    application.add_handler(CallbackQueryHandler(handle_quiz_answer, pattern=r"^quiz_"))
+    application.add_handler(CallbackQueryHandler(handle_quiz_result, pattern=r"^quiz_result_"))
 
     # Message handlers
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, dispatch_text_message))
@@ -535,99 +525,42 @@ def register_handlers(application: Application):
     logger.info("Handlers registered successfully.")
 
 
-async def main():
+def main():
     """Основная асинхронная функция для запуска бота"""
-    lock_file_handle = None
-    application = None
-    
-    try:
-        # Проверяем, что бот не запущен на другом сервере
-        lock_file_handle = acquire_lock('bot.lock')
-        if not lock_file_handle:
-            logger.error("Бот уже запущен на другом сервере!")
-            return None
-            
-        # Запускаем Flask-сервер в отдельном потоке
-        flask_thread = threading.Thread(target=run_flask, daemon=True)
-        flask_thread.start()
-        logger.info("Flask health check сервер запущен в отдельном потоке")
-        
-        # Добавляем случайную задержку перед запуском (0-10 секунд)
-        delay = random.uniform(0, 10)
-        logger.info(f"Ожидание {delay:.2f} секунд перед запуском бота...")
-        await asyncio.sleep(delay)
-        
-        if not TOKEN:
-            logger.critical("Токен бота не найден! Проверьте файл config.py.")
-            return None
-            
-        # Создаем приложение с сохранением состояния
-        persistence = PicklePersistence(filepath="bot_persistence.pkl")
-        application = Application.builder().token(TOKEN).persistence(persistence).build()
-        
-        # Регистрируем обработчики
-        register_handlers(application)
-        
-        # Запускаем бота с обработкой ошибок
-        logger.info("Запуск бота с новой архитектурой диалогов...")
-        
-        # Очищаем все обновления перед запуском
-        logger.info("Очистка обновлений перед запуском...")
-        await application.bot.delete_webhook(drop_pending_updates=True)
-        logger.info("Очистка обновлений завершена")
-        
-        # Запускаем бота
-        await application.initialize()
-        await application.start()
-        await application.updater.start_polling(
-            drop_pending_updates=True,
-            allowed_updates=Update.ALL_TYPES
-        )
-        logger.info("Бот успешно запущен")
-        
-        # Бесконечный цикл для поддержания работы бота
-        while True:
-            await asyncio.sleep(3600)
-            
-    except asyncio.CancelledError:
-        logger.info("Получен сигнал на завершение работы...")
-        raise
-        
-    except Exception as e:
-        logger.error(f"Критическая ошибка: {e}", exc_info=True)
-        raise
-        
-    finally:
-        # Корректно завершаем работу
-        if application:
-            try:
-                logger.info("Остановка бота...")
-                if hasattr(application, 'running') and application.running:
-                    await application.stop()
-                    await application.shutdown()
-            except Exception as e:
-                logger.error(f"Ошибка при остановке бота: {e}")
-        
-        if lock_file_handle:
-            release_lock(lock_file_handle)
-            
-        logger.info("Бот остановлен")
+    # Запускаем Flask-сервер в отдельном потоке
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    logger.info("Flask health check сервер запущен в отдельном потоке")
+    logger.info("--- Bot version: v2025.07.04-02.15-FIXED ---") # Ошибка отступа исправлена
+
+    if not TOKEN:
+        logger.critical("Токен бота не найден! Проверьте переменную окружения TOKEN.")
+        return
+
+    if not ADMIN_ID:
+        logger.critical("ID администратора не найден! Проверьте переменную окружения ADMIN_ID.")
+        return
+
+    # Создаем приложение с сохранением состояния
+    persistence = PicklePersistence(filepath="bot_persistence.pkl")
+    application = Application.builder().token(TOKEN).persistence(persistence).build()
+
+    # Регистрируем обработчики
+    register_handlers(application)
+
+    # Запускаем бота в режиме опроса.
+    # Этот метод автоматически обрабатывает запуск, остановку и корректное завершение.
+    logger.info("Запуск бота в режиме опроса...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+
 
 if __name__ == "__main__":
     try:
-        # Создаем event loop
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        # Запускаем основную функцию
-        main_task = loop.create_task(main())
-        loop.run_until_complete(main_task)
-        
-    except KeyboardInterrupt:
-        logger.info("Получен сигнал прерывания с клавиатуры")
+        main()
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Бот остановлен.")
     except Exception as e:
-        logger.error(f"Критическая ошибка: {e}", exc_info=True)
-    finally:
+        logger.critical(f"Критическая ошибка при запуске бота: {e}", exc_info=True)
         # Очищаем ресурсы
         if 'loop' in locals():
             # Отменяем все задачи
