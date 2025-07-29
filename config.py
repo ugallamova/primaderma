@@ -1,5 +1,7 @@
 # Telegram Bot Token
-TOKEN = "7554486624:AAF0bXfgljKuJ7I9fuMrGNx2dOD9Jnhl8Zc"
+import os
+
+TOKEN = os.getenv("TOKEN")
 
 # Admin ID (your Telegram ID)
-ADMIN_ID = 323976163
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
